@@ -1,0 +1,24 @@
+name = "rtv-edge-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+
+# Secrets (set via: npx wrangler secret put <KEY>)
+# SUPABASE_URL
+# SUPABASE_ANON_KEY
+# SUPABASE_SERVICE_KEY — THIS IS THE 503 FIX
+# CF_STREAM_API_TOKEN
+# CF_ACCOUNT_ID
+# CF_STREAM_SIGNING_KEY
+# WEBHOOK_SECRET
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "rtv-edge-ratelimit"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
