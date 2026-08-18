@@ -21,7 +21,7 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit --if-present || true
       - name: Scan for exposed secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm audit --audit-level=high || true
