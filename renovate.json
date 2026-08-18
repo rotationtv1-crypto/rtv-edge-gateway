@@ -9,6 +9,7 @@
   "rangeStrategy": "bump",
   "packageRules": [
     {"matchManagers": ["npm"], "matchUpdateTypes": ["minor", "patch"], "groupName": "npm non-major"},
-    {"matchManagers": ["github-actions"], "groupName": "github-actions"}
+    {"matchManagers": ["github-actions"], "groupName": "github-actions"},
+    {"matchUpdateTypes": ["patch"], "automerge": false}
   ]
 }
