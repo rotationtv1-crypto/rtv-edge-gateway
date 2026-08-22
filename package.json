@@ -1,7 +1,7 @@
 {
   "name": "@rotationtv/rtv-edge-gateway",
-  "version": "3.0.0",
-  "description": "RTV Edge Gateway \u2014 Production Cloudflare Worker (503 fix)",
+  "version": "3.1.0",
+  "description": "RTV Edge Gateway — Production Cloudflare Worker (503 fix + ported Supabase Edge Functions)",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
@@ -9,7 +9,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@supabase/supabase-js": "^2.109.0"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240718.0",
     "typescript": "^5.5.0",
