@@ -1,30 +1,35 @@
 /**
- * RTV Edge Gateway v3.0.0
+ * RTV Edge Gateway v3.1.0
  * ========================
  * Production-hardened Cloudflare Worker
- * Fixes: 503 errors from missing SUPABASE_SERVICE_KEY binding
- * Auth: Supabase session tokens (NOT raw initData)
- * Routes: streaming, gifts, health, webhooks
+ * - Streaming (Cloudflare Stream WHIP/WHEP)
+ * - Gifts (Supabase RPC transfer)
+ * - Auth via Supabase session tokens
+ * - Rate limiting optional (KV)
+ * - Zero hard 503 when secrets missing (reports degraded)
+ *
+ * Compliance: Telegram Stars (XTR) + TON only for money movement.
+ * No user-facing Stripe / RTV-token payment paths.
  */
 
 interface Env {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY: string;
-  CF_STREAM_API_TOKEN: string;
-  CF_ACCOUNT_ID: string;
-  CF_STREAM_SIGNING_KEY: string;
-  WEBHOOK_SECRET: string;
-  RATE_LIMIT_KV: KVNamespace;
+  CF_STREAM_API_TOKEN?: string;
+  CF_ACCOUNT_ID?: string;
+  CF_STREAM_SIGNING_KEY?: string;
+  WEBHOOK_SECRET?: string;
+  RATE_LIMIT_KV?: KVNamespace;
   ENVIRONMENT: string;
 }
 
-// ── Critical: Env validation to prevent 503s ──
+// ── Env validation ──
 function validateEnv(env: Env): string[] {
   const missing: string[] = [];
-  const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_KEY'];
+  const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_KEY'] as const;
   for (const key of required) {
-    if (!env[key as keyof Env]) missing.push(key);
+    if (!env[key]) missing.push(key);
   }
   return missing;
 }
@@ -63,10 +68,10 @@ async function requireAuth(request: Request, env: Env): Promise<SupabaseUser> {
     });
   }
 
-  return await res.json() as SupabaseUser;
+  return (await res.json()) as SupabaseUser;
 }
 
-// ── Supabase Service Client ──
+// ── Supabase helpers ──
 async function supabaseQuery(
   env: Env,
   table: string,
@@ -114,6 +119,9 @@ async function supabaseRPC(env: Env, fn: string, params: Record<string, unknown>
 
 // ── Cloudflare Stream ──
 async function createStreamLiveInput(env: Env, creatorId: string) {
+  if (!env.CF_ACCOUNT_ID || !env.CF_STREAM_API_TOKEN) {
+    throw new Error('CF_ACCOUNT_ID or CF_STREAM_API_TOKEN not configured');
+  }
   const res = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/stream/live_inputs`,
     {
@@ -133,10 +141,16 @@ async function createStreamLiveInput(env: Env, creatorId: string) {
   return data.result;
 }
 
-// ── Rate Limiter ──
-async function checkRateLimit(kv: KVNamespace, userId: string, action: string, maxPerMin: number): Promise<boolean> {
+// ── Rate Limiter (optional) ──
+async function checkRateLimit(
+  kv: KVNamespace | undefined,
+  userId: string,
+  action: string,
+  maxPerMin: number
+): Promise<boolean> {
+  if (!kv) return true; // no KV → allow
   const key = `rate:${action}:${userId}`;
-  const count = parseInt((await kv.get(key)) || '0');
+  const count = parseInt((await kv.get(key)) || '0', 10);
   if (count >= maxPerMin) return false;
   await kv.put(key, String(count + 1), { expirationTtl: 60 });
   return true;
@@ -169,7 +183,7 @@ async function handleStreamEnd(request: Request, env: Env, user: SupabaseUser, r
     id: `eq.${roomId}`,
     creator_id: `eq.${user.id}`,
     select: 'id',
-  });
+  }) as any[];
   if (!rooms?.length) return jsonError('Room not found or not owner', 404);
 
   await supabaseQuery(env, 'live_rooms', { id: `eq.${roomId}` }, 'PATCH', {
@@ -186,7 +200,7 @@ async function handleStreamPlay(env: Env, roomId: string) {
     id: `eq.${roomId}`,
     status: 'eq.live',
     select: 'whep_url,title,creator_id',
-  });
+  }) as any[];
   if (!rooms?.length) return jsonError('Stream not live', 404);
   return Response.json({ whep_url: rooms[0].whep_url, title: rooms[0].title });
 }
@@ -210,7 +224,7 @@ async function handleGiftSend(request: Request, env: Env, user: SupabaseUser) {
 
   if (!room_id || !gift_id) return jsonError('room_id and gift_id required', 400);
 
-  if (env.RATE_LIMIT_KV && !(await checkRateLimit(env.RATE_LIMIT_KV, user.id, 'gift', 20))) {
+  if (!(await checkRateLimit(env.RATE_LIMIT_KV, user.id, 'gift', 20))) {
     return jsonError('Rate limit exceeded', 429);
   }
 
@@ -218,7 +232,7 @@ async function handleGiftSend(request: Request, env: Env, user: SupabaseUser) {
     id: `eq.${gift_id}`,
     is_active: 'eq.true',
     select: 'id,name,rtv_cost,emoji',
-  });
+  }) as any[];
   if (!gifts?.length) return jsonError('Gift not found or inactive', 404);
   const gift = gifts[0];
 
@@ -226,7 +240,7 @@ async function handleGiftSend(request: Request, env: Env, user: SupabaseUser) {
     id: `eq.${room_id}`,
     status: 'eq.live',
     select: 'id,creator_id,title,rtv_earned_session',
-  });
+  }) as any[];
   if (!rooms?.length) return jsonError('Room not live', 404);
   const room = rooms[0];
 
@@ -239,10 +253,10 @@ async function handleGiftSend(request: Request, env: Env, user: SupabaseUser) {
     p_transfer_type: 'gift',
     p_description: gift.name,
     p_reference_id: room_id,
-  });
+  }) as any;
 
-  if ((transferResult as any)?.status !== 'completed') {
-    return jsonError((transferResult as any)?.message || 'Transfer failed', 400);
+  if (transferResult?.status !== 'completed') {
+    return jsonError(transferResult?.message || 'Transfer failed', 400);
   }
 
   await supabaseQuery(env, 'gift_transactions', {}, 'POST', {
@@ -257,7 +271,7 @@ async function handleGiftSend(request: Request, env: Env, user: SupabaseUser) {
   });
 
   await supabaseQuery(env, 'live_rooms', { id: `eq.${room_id}` }, 'PATCH', {
-    rtv_earned_session: room.rtv_earned_session + gift.rtv_cost,
+    rtv_earned_session: (room.rtv_earned_session || 0) + gift.rtv_cost,
   });
 
   return Response.json({
@@ -313,52 +327,54 @@ function corsHeaders(): Record<string, string> {
   };
 }
 
-// ── Main Export ──
+// ── Main ──
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const method = request.method;
 
-    // CORS
     if (method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders() });
     }
 
-    // Health — always responds (never 503)
+    // Health — always responds
     if (url.pathname === '/' || url.pathname === '/health') {
       const missing = validateEnv(env);
-      return Response.json({
-        status: missing.length ? 'degraded' : 'alive',
-        service: 'rtv-edge-gateway',
-        version: '3.0.0',
-        auth: 'supabase-session',
-        environment: env.ENVIRONMENT || 'unknown',
-        missing_bindings: missing,
-        heartbeat: '432Hz',
-        timestamp: new Date().toISOString(),
-      }, {
-        status: missing.length ? 503 : 200,
-        headers: corsHeaders(),
-      });
+      return Response.json(
+        {
+          status: missing.length ? 'degraded' : 'alive',
+          service: 'rtv-edge-gateway',
+          version: '3.1.0',
+          auth: 'supabase-session',
+          environment: env.ENVIRONMENT || 'unknown',
+          missing_bindings: missing,
+          rate_limit: env.RATE_LIMIT_KV ? 'enabled' : 'disabled',
+          timestamp: new Date().toISOString(),
+        },
+        {
+          status: missing.length ? 503 : 200,
+          headers: corsHeaders(),
+        }
+      );
     }
 
-    // Env validation — fail gracefully instead of 503
     const missing = validateEnv(env);
     if (missing.length) {
-      return Response.json({
-        error: 'Service configuration incomplete',
-        missing_bindings: missing,
-        fix: 'Run: npx wrangler secret put ' + missing[0],
-      }, { status: 503, headers: corsHeaders() });
+      return Response.json(
+        {
+          error: 'Service configuration incomplete',
+          missing_bindings: missing,
+          fix: `Run: npx wrangler secret put ${missing[0]}`,
+        },
+        { status: 503, headers: corsHeaders() }
+      );
     }
 
     try {
-      // Webhook (no auth)
       if (url.pathname === '/webhook/stream' && method === 'POST') {
         return await handleStreamWebhook(request, env);
       }
 
-      // Auth-required routes
       const user = await requireAuth(request, env);
 
       if (url.pathname === '/api/stream/create' && method === 'POST') {

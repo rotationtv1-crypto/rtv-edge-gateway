@@ -7,17 +7,23 @@ compatibility_flags = ["nodejs_compat"]
 ENVIRONMENT = "production"
 
 # Secrets (set via: npx wrangler secret put <KEY>)
-# SUPABASE_URL
-# SUPABASE_ANON_KEY
-# SUPABASE_SERVICE_KEY — THIS IS THE 503 FIX
-# CF_STREAM_API_TOKEN
-# CF_ACCOUNT_ID
-# CF_STREAM_SIGNING_KEY
-# WEBHOOK_SECRET
+# Required for full operation:
+#   SUPABASE_URL
+#   SUPABASE_ANON_KEY
+#   SUPABASE_SERVICE_KEY   ← critical (prevents 503)
+#   CF_STREAM_API_TOKEN
+#   CF_ACCOUNT_ID
+#   CF_STREAM_SIGNING_KEY
+#   WEBHOOK_SECRET
 
-[[kv_namespaces]]
-binding = "RATE_LIMIT_KV"
-id = "rtv-edge-ratelimit"
+# Optional rate limiting — create real namespace first:
+#   npx wrangler kv namespace create RATE_LIMIT_KV
+# Then replace the id below with the returned ID.
+# If unbound, rate limiting is skipped gracefully.
+
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT_KV"
+# id = "REPLACE_WITH_REAL_KV_ID"
 
 [observability]
 enabled = true
