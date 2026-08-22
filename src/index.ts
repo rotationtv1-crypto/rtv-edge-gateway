@@ -7,10 +7,15 @@
  * - Auth via Supabase session tokens
  * - Rate limiting optional (KV)
  * - Zero hard 503 when secrets missing (reports degraded)
+ * - Ported Supabase Edge Functions under /functions/* (Deno → Workers)
  *
  * Compliance: Telegram Stars (XTR) + TON only for money movement.
  * No user-facing Stripe / RTV-token payment paths.
  */
+
+import { handleFilmGenerator } from './functions/film-generator';
+import { handleFilmGenerationPipeline } from './functions/film-generation-pipeline';
+import { handleAiContentProcessor } from './functions/ai-content-processor';
 
 interface Env {
   SUPABASE_URL: string;
@@ -22,6 +27,10 @@ interface Env {
   WEBHOOK_SECRET?: string;
   RATE_LIMIT_KV?: KVNamespace;
   ENVIRONMENT: string;
+  // Ported Supabase Edge Functions (film pipeline / AI processor)
+  VENICE_API_KEY?: string;
+  CF_STREAM_TOKEN?: string;
+  CRON_SECRET?: string;
 }
 
 // ── Env validation ──
@@ -335,6 +344,18 @@ export default {
 
     if (method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders() });
+    }
+
+    // ── Ported Supabase Edge Functions (Deno → Workers) ──
+    // Auth: Bearer CRON_SECRET enforced inside each handler.
+    if (url.pathname === '/functions/film-generator' && method === 'POST') {
+      return handleFilmGenerator(request, env);
+    }
+    if (url.pathname === '/functions/film-generation-pipeline' && method === 'POST') {
+      return handleFilmGenerationPipeline(request, env);
+    }
+    if (url.pathname === '/functions/ai-content-processor' && method === 'POST') {
+      return handleAiContentProcessor(request, env);
     }
 
     // Health — always responds
