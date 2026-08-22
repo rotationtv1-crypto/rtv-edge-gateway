@@ -1,25 +1,21 @@
 name = "rtv-edge-gateway"
 main = "src/index.ts"
-compatibility_date = "2026-07-01"
+compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "production"
 
 # Secrets (set via: npx wrangler secret put <KEY>)
-# Required for full operation:
+# Required:
 #   SUPABASE_URL
 #   SUPABASE_ANON_KEY
-#   SUPABASE_SERVICE_KEY   ← critical (prevents 503)
+#   SUPABASE_SERVICE_KEY
+# Optional:
 #   CF_STREAM_API_TOKEN
 #   CF_ACCOUNT_ID
 #   CF_STREAM_SIGNING_KEY
 #   WEBHOOK_SECRET
-
-# Optional rate limiting — create real namespace first:
-#   npx wrangler kv namespace create RATE_LIMIT_KV
-# Then replace the id below with the returned ID.
-# If unbound, rate limiting is skipped gracefully.
 
 # [[kv_namespaces]]
 # binding = "RATE_LIMIT_KV"
@@ -28,3 +24,8 @@ ENVIRONMENT = "production"
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+# Optional custom domains (uncomment after DNS):
+# routes = [
+#   { pattern = "api.rotationtv.network/*", zone_name = "rotationtv.network" }
+# ]
